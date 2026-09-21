@@ -1,0 +1,5 @@
+n_samples: 78800
+n_features: 10
+train_rmse_delta: 5.062047737826991
+train_mae_delta: 4.045500597036799
+train_seeds: 100..139
