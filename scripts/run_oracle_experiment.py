@@ -112,14 +112,16 @@ def run_condition_analysis(shift_type: str):
          lambda: GatedACIPredictor(policy="margin_buffer", margin_kappa=0.50, horizon=20, update_on_raw=False, max_q=100.0)),
         ("Policy C (raw update): buffer kappa=0.50",
          lambda: GatedACIPredictor(policy="margin_buffer", margin_kappa=0.50, horizon=20, update_on_raw=True, max_q=100.0)),
+        ("Policy C (raw update): buffer kappa=2.00 (true 3x ratio)",
+         lambda: GatedACIPredictor(policy="margin_buffer", margin_kappa=2.00, horizon=20, update_on_raw=True, max_q=100.0)),
         ("Policy D: alpha-shift (alpha=0.02)",
          lambda: GatedACIPredictor(policy="alpha_shift", alpha_boost=0.02, horizon=20, max_q=100.0)),
     ]
 
     print("-" * 115)
-    print(f"{'Method / Policy':<38} | {'Overall':<7} | {'0–19 Cov (Δ vs Base [95% CI])':<32} | {'Width 0–19':<10} | {'Winkler 0–19':<12}")
+    print(f"{'Method / Policy':<42} | {'Overall':<7} | {'0–19 Cov (Δ vs Base [95% CI])':<32} | {'Width 0–19':<10} | {'Winkler 0–19':<12}")
     print("-" * 115)
-    print(f"{'Standard ACI (Gate OFF)':<38} | {np.mean(base_overall):.4f}  | {np.mean(base_cov):.4f} (reference)                | {np.mean(base_w20):.2f}       | {np.mean(base_wink20):.2f}")
+    print(f"{'Standard ACI (W=200, Gate OFF)':<42} | {np.mean(base_overall):.4f}  | {np.mean(base_cov):.4f} (reference)                | {np.mean(base_w20):.2f}       | {np.mean(base_wink20):.2f}")
 
     eval_records = []
 
@@ -137,11 +139,31 @@ def run_condition_analysis(shift_type: str):
         d_cov = cov - base_cov
         ci_cov = bootstrap_ci(d_cov)
 
-        d_w = w20 - base_w20
-        d_wink = wink20 - base_wink20
-
-        print(f"{name:<38} | {np.mean(ov):.4f}  | {np.mean(cov):.4f} ({np.mean(d_cov):+.4f} [{ci_cov[0]:+.4f}, {ci_cov[1]:+.4f}]) | {np.mean(w20):.2f}       | {np.mean(wink20):.2f}")
+        print(f"{name:<42} | {np.mean(ov):.4f}  | {np.mean(cov):.4f} ({np.mean(d_cov):+.4f} [{ci_cov[0]:+.4f}, {ci_cov[1]:+.4f}]) | {np.mean(w20):.2f}       | {np.mean(wink20):.2f}")
         eval_records.append((name, res, cov, w20, wink20, ov, ov_w))
+
+    # Gate-Free Short-Window ACI Baselines (Is Policy B just short-window ACI?)
+    print("-" * 115)
+    print("GATE-FREE PARAMETER BASELINES (Varying Calibration Window W):")
+    print("-" * 115)
+    short_w_baselines = [
+        ("Gate-Free ACI (W=20, no gate)", lambda: ACIPredictor(cal_window=20, max_q=100.0)),
+        ("Gate-Free ACI (W=30, no gate)", lambda: ACIPredictor(cal_window=30, max_q=100.0)),
+        ("Gate-Free ACI (W=50, no gate)", lambda: ACIPredictor(cal_window=50, max_q=100.0)),
+        ("Gate-Free ACI (W=100, no gate)", lambda: ACIPredictor(cal_window=100, max_q=100.0)),
+    ]
+    for name, factory in short_w_baselines:
+        res = evaluate_aci_controlled(
+            shift_at=SHIFT_AT, T=T, seeds=SEEDS, forecaster="gbm",
+            shift_type=shift_type, predictor_factory=factory
+        )
+        cov = np.array([r.near_shift_first20.coverage for r in res])
+        w20 = np.array([r.near_shift_first20.mean_width for r in res])
+        wink20 = np.array([r.near_shift_first20.winkler_score for r in res])
+        ov = np.array([r.overall.coverage for r in res])
+        d_cov = cov - base_cov
+        ci_cov = bootstrap_ci(d_cov)
+        print(f"{name:<42} | {np.mean(ov):.4f}  | {np.mean(cov):.4f} ({np.mean(d_cov):+.4f} [{ci_cov[0]:+.4f}, {ci_cov[1]:+.4f}]) | {np.mean(w20):.2f}       | {np.mean(wink20):.2f}")
 
     # Controls for the primary policy: Policy C (raw update, kappa=0.50)
     print("-" * 115)
