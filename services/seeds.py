@@ -14,6 +14,12 @@ HELD_OUT_TEST_SEEDS: Sequence[int] = range(1000, 1010) # 10 multi-shift test str
 FORECASTER_TRAIN_SEEDS: Sequence[int] = range(100, 140) # 40 streams (stationary & multi-shift)
 
 # ACI evaluation & benchmarks
-CONTROLLED_EVAL_SEEDS: Sequence[int] = range(7000, 7010) # 10 single-shift streams
+CONTROLLED_EVAL_SEEDS: Sequence[int] = range(7000, 7010) # 10 single-shift streams (historical)
 MULTI_SHIFT_SANITY_SEEDS: Sequence[int] = range(8000, 8005) # 5 multi-shift sanity streams
 STATIONARY_SANITY_SEEDS: Sequence[int] = range(9000, 9005)  # 5 stationary sanity streams
+
+# Validation seeds for threshold tuning, policy selection, and oracle experiments (100 streams)
+VAL_SEEDS: Sequence[int] = range(500, 600)
+
+# Pristine 500-seed test range for locked final evaluation (completely uncontaminated)
+PRISTINE_TEST_SEEDS: Sequence[int] = range(50000, 50500)

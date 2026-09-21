@@ -180,16 +180,22 @@ def evaluate_aci_controlled(
     latency_base: float = 50.0,
     latency_sigma: float = 5.0,
     latency_jump_scale: float = 4.0,
+    shift_type: str = "mean",
+    variance_scale: float = 3.0,
     alpha_target: float = 0.10,
     gamma: float = 0.005,
     cal_window: int = 200,
     warm_up: int = 50,
     bin_width: int = 10,
     near_window: int = 100,
+    predictor_factory: Callable[[], ACIPredictor] | None = None,
+    alarm_schedule_fn: Callable[[int, int], np.ndarray] | None = None,
 ) -> list[ControlledCoverageResult]:
     """
     Controlled single-shift coverage evaluation.
     Guarantees all windows are populated with fixed sample counts.
+    Supports mean shifts and variance shifts, with pluggable predictor factories
+    and alarm schedules.
     """
     assert shift_at + 950 < T, f"shift_at={shift_at} + 950 >= T={T}"
     assert shift_at > warm_up + 100, f"shift_at={shift_at} too close to warm_up={warm_up}"
@@ -209,20 +215,40 @@ def evaluate_aci_controlled(
         stream = np.zeros(T)
         stream[0] = latency_base
         mean_t = latency_base
-        for t in range(1, T):
-            if t == shift_at:
-                direction = rng.choice([-1, 1])
-                mean_t += direction * latency_jump_scale * latency_sigma
-            stream[t] = ar_phi * stream[t - 1] + (1 - ar_phi) * mean_t + rng.normal(0, latency_sigma)
+
+        if shift_type == "mean":
+            for t in range(1, T):
+                if t == shift_at:
+                    direction = rng.choice([-1, 1])
+                    mean_t += direction * latency_jump_scale * latency_sigma
+                stream[t] = ar_phi * stream[t - 1] + (1 - ar_phi) * mean_t + rng.normal(0, latency_sigma)
+        elif shift_type == "variance":
+            for t in range(1, T):
+                sigma_t = latency_sigma * variance_scale if t >= shift_at else latency_sigma
+                stream[t] = ar_phi * stream[t - 1] + (1 - ar_phi) * mean_t + rng.normal(0, sigma_t)
+        else:
+            raise ValueError(f"Unknown shift_type '{shift_type}'. Expected 'mean' or 'variance'.")
 
         # Point forecast
         y_hat = get_point_forecasts(stream, forecaster)
 
-        # Run ACI
-        predictor = ACIPredictor(alpha_target=alpha_target, gamma=gamma, cal_window=cal_window)
+        # Initialize predictor
+        if predictor_factory is not None:
+            predictor = predictor_factory()
+        else:
+            predictor = ACIPredictor(alpha_target=alpha_target, gamma=gamma, cal_window=cal_window)
+
+        alarm_flags = alarm_schedule_fn(T, shift_at) if alarm_schedule_fn is not None else None
+
         covered = np.zeros(T, dtype=bool)
         widths = np.zeros(T, dtype=np.float64)
         for t in range(T):
+            if alarm_flags is not None and alarm_flags[t]:
+                if hasattr(predictor, "trigger"):
+                    predictor.trigger()
+            elif hasattr(predictor, "step_tick"):
+                predictor.step_tick()
+
             lo, hi = predictor.predict(y_hat[t])
             covered[t] = (lo <= stream[t] <= hi)
             widths[t] = hi - lo
