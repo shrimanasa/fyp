@@ -135,6 +135,8 @@ class GatedACIPredictor(ACIPredictor):
         alpha_boost: float = 0.02,
         uniform_margin_kappa: float = 0.0,
         max_q: float | None = None,
+        flush_min_window: int = 20,
+        update_on_raw: bool = True,
     ) -> None:
         super().__init__(
             alpha_target=alpha_target,
@@ -148,15 +150,20 @@ class GatedACIPredictor(ACIPredictor):
         self.horizon = horizon
         self.margin_kappa = margin_kappa
         self.alpha_boost = alpha_boost
+        self.flush_min_window = flush_min_window
+        self.update_on_raw = update_on_raw
 
         self.cooldown: int = 0
         self._prev_alarm: bool = False
+        self._raw_interval: tuple[float, float] = (-np.inf, np.inf)
 
     def trigger(self) -> None:
         """Trigger an alarm at current timestep."""
         if not self._prev_alarm and self.policy == "window_flush":
-            self._cal_scores.clear()
-            self._sorted_scores.clear()
+            # Retain the most recent flush_min_window scores to preserve finite-sample validity
+            while len(self._cal_scores) > self.flush_min_window:
+                self._cal_scores.popleft()
+            self._sorted_scores = sorted(self._cal_scores)
         self.cooldown = self.horizon
         self._prev_alarm = True
 
@@ -171,7 +178,8 @@ class GatedACIPredictor(ACIPredictor):
         n = len(self._sorted_scores)
         if n == 0:
             q = self.max_q if self.max_q is not None else np.inf
-            self._last_interval = (y_hat - q, y_hat + q)
+            self._raw_interval = (y_hat - q, y_hat + q)
+            self._last_interval = self._raw_interval
             return self._last_interval
 
         eff_alpha = (
@@ -188,18 +196,24 @@ class GatedACIPredictor(ACIPredictor):
         else:
             q = self._sorted_scores[k - 1]
 
-        # Policy C: margin inflation during alarm
-        if self.policy == "margin_buffer" and self.cooldown > 0 and np.isfinite(q):
-            q = q * (1.0 + self.margin_kappa)
-        elif self.uniform_margin_kappa > 0.0 and np.isfinite(q):
-            q = q * (1.0 + self.uniform_margin_kappa)
+        # Raw unbuffered interval
+        self._raw_interval = (y_hat - q, y_hat + q)
 
-        self._last_interval = (y_hat - q, y_hat + q)
+        # Served interval (with margin inflation if policy C is active)
+        q_served = q
+        if self.policy == "margin_buffer" and self.cooldown > 0 and np.isfinite(q):
+            q_served = q * (1.0 + self.margin_kappa)
+        elif self.uniform_margin_kappa > 0.0 and np.isfinite(q):
+            q_served = q * (1.0 + self.uniform_margin_kappa)
+
+        self._last_interval = (y_hat - q_served, y_hat + q_served)
         return self._last_interval
 
     def update(self, y_true: float, y_hat: float) -> None:
         # Step 1: miscoverage check against pre-update interval
-        lo, hi = self._last_interval
+        # If update_on_raw=True, alpha_t tracks true baseline errors, preventing artificial deficit payback
+        check_interval = self._raw_interval if self.update_on_raw else self._last_interval
+        lo, hi = check_interval
         missed = float(y_true < lo or y_true > hi)
 
         # Step 2: append score to sliding calibration window

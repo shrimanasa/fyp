@@ -135,12 +135,13 @@ class BinnedWindow:
     coverage: float
     mean_width: float
     n_samples: int
+    winkler_score: float = 0.0
 
     def __str__(self) -> str:
         if self.n_samples == 0:
             return f"steps {self.bin_start:>3}–{self.bin_end-1:>3}: n/a (0 samples)"
         return (f"steps {self.bin_start:>3}–{self.bin_end-1:>3}: "
-                f"{self.coverage:.4f} (w={self.mean_width:.2f}, n={self.n_samples})")
+                f"{self.coverage:.4f} (w={self.mean_width:.2f}, wink={self.winkler_score:.2f}, n={self.n_samples})")
 
 
 @dataclass
@@ -149,11 +150,12 @@ class WindowCoverage:
     coverage: float
     mean_width: float
     n_samples: int
+    winkler_score: float = 0.0
 
     def __str__(self) -> str:
         if self.n_samples == 0:
             return "n/a (0 samples)"
-        return f"{self.coverage:.4f} (w={self.mean_width:.2f}, n={self.n_samples})"
+        return f"{self.coverage:.4f} (w={self.mean_width:.2f}, wink={self.winkler_score:.2f}, n={self.n_samples})"
 
 
 @dataclass
@@ -242,6 +244,9 @@ def evaluate_aci_controlled(
 
         covered = np.zeros(T, dtype=bool)
         widths = np.zeros(T, dtype=np.float64)
+        winklers = np.zeros(T, dtype=np.float64)
+        penalty = 2.0 / alpha_target
+
         for t in range(T):
             if alarm_flags is not None and alarm_flags[t]:
                 if hasattr(predictor, "trigger"):
@@ -250,9 +255,18 @@ def evaluate_aci_controlled(
                 predictor.step_tick()
 
             lo, hi = predictor.predict(y_hat[t])
-            covered[t] = (lo <= stream[t] <= hi)
-            widths[t] = hi - lo
-            predictor.update(stream[t], y_hat[t])
+            y_t = stream[t]
+            covered[t] = (lo <= y_t <= hi)
+            w = hi - lo
+            widths[t] = w
+            if y_t < lo:
+                winklers[t] = w + penalty * (lo - y_t)
+            elif y_t > hi:
+                winklers[t] = w + penalty * (y_t - hi)
+            else:
+                winklers[t] = w
+
+            predictor.update(y_t, y_hat[t])
 
         # Windows
         t_idx = np.arange(T)
@@ -263,7 +277,8 @@ def evaluate_aci_controlled(
             n = int(mask.sum())
             c = float(covered[mask].mean()) if n > 0 else float("nan")
             w = float(widths[mask].mean()) if n > 0 else float("nan")
-            return WindowCoverage(coverage=c, mean_width=w, n_samples=n)
+            wink = float(winklers[mask].mean()) if n > 0 else float("nan")
+            return WindowCoverage(coverage=c, mean_width=w, n_samples=n, winkler_score=wink)
 
         # overall
         overall_cov = _make_window_cov(mask_warm)
@@ -284,12 +299,14 @@ def evaluate_aci_controlled(
             n_b = int(mask_b.sum())
             c_b = float(covered[mask_b].mean()) if n_b > 0 else float("nan")
             w_b = float(widths[mask_b].mean()) if n_b > 0 else float("nan")
+            wink_b = float(winklers[mask_b].mean()) if n_b > 0 else float("nan")
             bins.append(BinnedWindow(
                 bin_start=b_start,
                 bin_end=b_end,
                 coverage=c_b,
                 mean_width=w_b,
                 n_samples=n_b,
+                winkler_score=wink_b,
             ))
 
         # steady-state: [850, 950)
