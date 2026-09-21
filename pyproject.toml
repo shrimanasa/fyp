@@ -1,13 +1,13 @@
 [build-system]
 requires = ["setuptools>=68"]
-build-backend = "setuptools.backends.legacy:build"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "conformal-drift-gate"
 version = "0.1.0"
 requires-python = ">=3.10"
 dependencies = [
-    "numpy>=1.26,<2.0",
+    "numpy>=1.26",
     "scipy>=1.12",
     "scikit-learn>=1.4",
     "matplotlib>=3.8",

@@ -1,9 +1,8 @@
 """
 Gate classifier training.
 
-Trains a HistGradientBoostingClassifier (classical ML, as per brief) to
-predict whether a distribution shift is imminent (within the 50-step lead
-window).
+Trains a HistGradientBoostingClassifier to detect that a distribution shift
+has just started (within the [s, s+50) onset window).
 
 Train/test split strategy: held-out by shift schedule, not by timestep.
 This avoids data leakage from splitting a continuous stream mid-run —

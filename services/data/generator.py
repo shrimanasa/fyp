@@ -63,7 +63,7 @@ class ShiftSchedule:
 class StreamSample(NamedTuple):
     latency: np.ndarray          # shape (T,)
     error_rate: np.ndarray       # shape (T,)
-    latency_label: np.ndarray    # 1 if within lead_steps BEFORE a latency shift
+    latency_label: np.ndarray    # 1 if within lead_steps ONSET window [s, s+lead_steps)
     error_rate_label: np.ndarray
 
 
